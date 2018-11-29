@@ -1,0 +1,6 @@
+apiVersion: andy.org/v1alpha1
+kind: PodSet
+metadata:
+  name: my-awesome-podset
+spec:
+  replicas: 3
