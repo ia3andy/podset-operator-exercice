@@ -4,12 +4,13 @@ import (
 	"context"
 	andyv1alpha1 "ia3andy/podset-operator/pkg/apis/andy/v1alpha1"
 	"log"
+	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -96,7 +97,8 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 		return reconcile.Result{}, err
 	}
 
-	log.Printf("PodSet Spec.Replicas is %d", instance.Spec.Replicas)
+	replicas := int(instance.Spec.Replicas)
+	log.Printf("PodSet Spec.Replicas is %d", replicas)
 
 	// Define a new Pod object
 	pod := newPodForCR(instance)
@@ -106,37 +108,86 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 		return reconcile.Result{}, err
 	}
 
-	// Check if this Pod already exists
-	found := &corev1.Pod{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
-	if err != nil && errors.IsNotFound(err) {
-		log.Printf("Creating a new Pod %s/%s\n", pod.Namespace, pod.Name)
+	pods, err := listPods(instance, r)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	countPods := len(pods.Items)
+
+	log.Printf("List with size: %d", countPods)
+
+	if countPods < replicas {
+		log.Printf("Creating a new Pod %s/%s\n", pod.Namespace, pod.GenerateName)
+
 		err = r.client.Create(context.TODO(), pod)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
+	} else if countPods > replicas {
+		podToDelete := &pods.Items[countPods-1]
+		log.Printf("Too many pods deleting the last one %s/%s\n", podToDelete.Namespace, podToDelete.Name)
+		err = r.client.Delete(context.TODO(), podToDelete)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
 
-		// Pod created successfully - don't requeue
-		return reconcile.Result{}, nil
-	} else if err != nil {
+	podsAfterProcess, err := listPods(instance, r)
+
+	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	// Pod already exists - don't requeue
-	log.Printf("Skip reconcile: Pod %s/%s already exists", found.Namespace, found.Name)
+	podNames := getPodNames(podsAfterProcess.Items)
+
+	if !reflect.DeepEqual(podNames, instance.Status.PodNames) {
+		instance.Status.PodNames = podNames
+		err = r.client.Update(context.TODO(), instance)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+
+	// Pod process successfully terminated - don't requeue
 	return reconcile.Result{}, nil
+}
+
+func getPodNames(pods []corev1.Pod) []string {
+	var podNames []string
+	for _, pod := range pods {
+		podNames = append(podNames, pod.Name)
+	}
+	return podNames
+}
+
+func listPods(cr *andyv1alpha1.PodSet, r *ReconcilePodSet) (*corev1.PodList, error) {
+	pods := &corev1.PodList{}
+
+	labelSelector := labels.SelectorFromSet(labelsForCR(cr))
+	listOps := &client.ListOptions{
+		Namespace:     cr.Namespace,
+		LabelSelector: labelSelector,
+	}
+
+	err := r.client.List(context.TODO(), listOps, pods)
+
+	return pods, err
+}
+
+func labelsForCR(cr *andyv1alpha1.PodSet) map[string]string {
+	return map[string]string{
+		"app": cr.Name,
+	}
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
 func newPodForCR(cr *andyv1alpha1.PodSet) *corev1.Pod {
-	labels := map[string]string{
-		"app": cr.Name,
-	}
+	labels := labelsForCR(cr)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
-			Namespace: cr.Namespace,
-			Labels:    labels,
+			GenerateName: cr.Name + "-pod",
+			Namespace:    cr.Namespace,
+			Labels:       labels,
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{

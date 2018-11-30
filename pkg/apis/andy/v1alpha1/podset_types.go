@@ -11,7 +11,7 @@ import (
 type PodSetSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
-	Replicas int `json:"replicas"`
+	Replicas int32 `json:"replicas"`
 }
 
 // PodSetStatus defines the observed state of PodSet

@@ -3,4 +3,4 @@ kind: PodSet
 metadata:
   name: my-awesome-podset
 spec:
-  replicas: 3
+  replicas: 10
