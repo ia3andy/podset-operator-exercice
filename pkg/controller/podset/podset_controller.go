@@ -124,6 +124,7 @@ func (r *ReconcilePodSet) Reconcile(request reconcile.Request) (reconcile.Result
 			return reconcile.Result{}, err
 		}
 	} else if countPods > replicas {
+		//TODO delete a replica that is not already terminating
 		podToDelete := &pods.Items[countPods-1]
 		log.Printf("Too many pods deleting the last one %s/%s\n", podToDelete.Namespace, podToDelete.Name)
 		err = r.client.Delete(context.TODO(), podToDelete)
@@ -168,6 +169,15 @@ func listPods(cr *andyv1alpha1.PodSet, r *ReconcilePodSet) (*corev1.PodList, err
 		Namespace:     cr.Namespace,
 		LabelSelector: labelSelector,
 	}
+
+	/** another approach:
+		listOps := &client.ListOptions{
+			Namespace:     cr.Namespace,
+			LabelSelector: labelSelector,
+		}
+	    listOps.SetLabelSelector(fmt.Sprintf("%s=%s", POD_LABEL_NAME, cr.Name))
+	    err := r.client.List(context.TODO(), opts, podList)
+	**/
 
 	err := r.client.List(context.TODO(), listOps, pods)
 
